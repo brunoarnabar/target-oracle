@@ -14,7 +14,7 @@ python = ">=3.9.2,<3.11"
 requests = "^2.25.1"
 singer-sdk = "^0.47.4"
 cryptography = "^44.0.0"
-sqlalchemy = ">=1.4,<2.0"
+sqlalchemy = ">=1.4,<3.0"
 oracledb = {extras = ["sqlalchemy"], version = "^3.3.0"}
 
 [tool.poetry.dev-dependencies]
