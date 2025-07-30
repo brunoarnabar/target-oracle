@@ -24,7 +24,7 @@ class TargetOracle(SQLTarget):
         th.Property(
             "driver_name",
             th.StringType,
-            default="oracle+cx_oracle",
+            default="oracle+oracledb",
             description="SQLAlchemy driver name",
         ),
         th.Property(

@@ -10,7 +10,7 @@ git
 | Setting                  | Required | Default | Description |
 |:-------------------------|:--------:|:-------:|:------------|
 | sqlalchemy_url           | False    | None    | SQLAlchemy connection string |
-| driver_name              | False    | oracle+cx_oracle | SQLAlchemy driver name |
+| driver_name              | False    | oracle+oracledb | SQLAlchemy driver name |
 | username                 | False    | None    | Oracle username |
 | password                 | False    | None    | Oracle password |
 | host                     | False    | None    | Oracle host |

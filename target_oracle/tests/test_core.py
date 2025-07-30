@@ -66,7 +66,7 @@ def get_engine():
     config = oracle_config_dict
 
     connection_url = sqlalchemy.engine.url.URL.create(
-            drivername="oracle+cx_oracle",
+            drivername="oracle+oracledb",
             username=config["user"],
             password=config["password"],
             host=config["host"],
