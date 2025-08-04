@@ -6,6 +6,7 @@ from singer_sdk.sinks import SQLSink
 from singer_sdk.connectors import SQLConnector
 from singer_sdk.helpers._conformers import replace_leading_digit
 import sqlalchemy
+import importlib
 from typing import Any, Dict, Iterable, List, Optional, cast
 from sqlalchemy.dialects import oracle
 from singer_sdk.helpers._typing import get_datelike_property_type
@@ -34,6 +35,18 @@ class OracleConnector(SQLConnector):
 
         if config.get("sqlalchemy_url"):
             return config["sqlalchemy_url"]
+        # Ensure the ``oracle+oracledb`` dialect is available.  Older SQLAlchemy
+        # releases (<2.0) do not include this dialect, which results in a
+        # ``NoSuchModuleError`` during engine creation.  Importing the dialect
+        # here both validates its presence and registers it with SQLAlchemy's
+        # plugin loader.
+        try:
+            importlib.import_module("sqlalchemy.dialects.oracle.oracledb")
+        except ModuleNotFoundError as exc:  # pragma: no cover - dependency issue
+            raise RuntimeError(
+                "The 'oracle+oracledb' dialect requires SQLAlchemy 2.x and the"
+                " 'oracledb' package."
+            ) from exc
 
         connection_url = sqlalchemy.engine.url.URL.create(
             drivername="oracle+oracledb",
