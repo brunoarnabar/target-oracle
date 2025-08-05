@@ -41,7 +41,10 @@ class OracleConnector(SQLConnector):
         if url:
             try:
                 url_obj = sqlalchemy.engine.make_url(url)
-                wallet = url_obj.query.get("wallet_location") or url_obj.query.get("config_dir")
+                wallet = (
+                    url_obj.query.get("wallet_location")
+                    or url_obj.query.get("config_dir")
+                )
                 if wallet:
                     candidates.append(("url.wallet_location", wallet))
             except Exception:  # pragma: no cover - defensive
@@ -49,8 +52,30 @@ class OracleConnector(SQLConnector):
 
         for source, path in candidates:
             if os.path.isdir(path):
-                self.logger.debug("Wallet directory found from %s: %s", source, path)
-                return path
+                if os.access(path, os.R_OK):
+                    try:
+                        contents = ", ".join(sorted(os.listdir(path)))
+                    except Exception as ex:  # pragma: no cover - defensive
+                        self.logger.debug(
+                            "Wallet directory found from %s but contents unreadable: %s (%s)",
+                            source,
+                            path,
+                            ex,
+                        )
+                        return path
+                    self.logger.debug(
+                        "Wallet directory found from %s: %s contains [%s]",
+                        source,
+                        path,
+                        contents,
+                    )
+                    return path
+                self.logger.debug(
+                    "Wallet directory found from %s but is not readable: %s",
+                    source,
+                    path,
+                )
+                continue
             self.logger.debug("Wallet directory not found from %s: %s", source, path)
         self.logger.debug("No wallet directory could be resolved from %s", candidates)
         return None
