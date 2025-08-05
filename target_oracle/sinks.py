@@ -5,13 +5,16 @@ from __future__ import annotations
 from singer_sdk.sinks import SQLSink
 from singer_sdk.connectors import SQLConnector
 from singer_sdk.helpers._conformers import replace_leading_digit
-import sqlalchemy
-from typing import Any, Dict, Iterable, List, Optional, cast
-from sqlalchemy.dialects import oracle
-from singer_sdk.helpers._typing import get_datelike_property_type
-from sqlalchemy.schema import PrimaryKeyConstraint
-from sqlalchemy import Column
+import importlib
+import os
 import re
+from typing import Any, Dict, Iterable, List, Optional, cast
+
+import sqlalchemy
+from sqlalchemy import Column
+from sqlalchemy.dialects import oracle
+from sqlalchemy.schema import PrimaryKeyConstraint
+from singer_sdk.helpers._typing import get_datelike_property_type
 
 class OracleConnector(SQLConnector):
     """The connector for Oracle.
@@ -25,6 +28,33 @@ class OracleConnector(SQLConnector):
     allow_merge_upsert: bool = True  # Whether MERGE UPSERT is supported.
     allow_temp_tables: bool = True  # Whether temp tables are supported.
 
+    def _resolve_wallet_dir(self, config: dict) -> Optional[str]:
+        """Locate the Oracle wallet directory and log the search process."""
+
+        candidates: List[tuple[str, str]] = []
+        if config.get("wallet_dir"):
+            candidates.append(("config.wallet_dir", config["wallet_dir"]))
+        env_tns_admin = os.getenv("TNS_ADMIN")
+        if env_tns_admin:
+            candidates.append(("env.TNS_ADMIN", env_tns_admin))
+        url = config.get("sqlalchemy_url")
+        if url:
+            try:
+                url_obj = sqlalchemy.engine.make_url(url)
+                wallet = url_obj.query.get("wallet_location") or url_obj.query.get("config_dir")
+                if wallet:
+                    candidates.append(("url.wallet_location", wallet))
+            except Exception:  # pragma: no cover - defensive
+                self.logger.debug("Failed to parse sqlalchemy_url for wallet path")
+
+        for source, path in candidates:
+            if os.path.isdir(path):
+                self.logger.debug("Wallet directory found from %s: %s", source, path)
+                return path
+            self.logger.debug("Wallet directory not found from %s: %s", source, path)
+        self.logger.debug("No wallet directory could be resolved from %s", candidates)
+        return None
+
     def get_sqlalchemy_url(self, config: dict) -> str:
         """Generates a SQLAlchemy URL for Oracle.
 
@@ -32,8 +62,26 @@ class OracleConnector(SQLConnector):
             config: The configuration for the connector.
         """
 
+        wallet_dir = self._resolve_wallet_dir(config)
+        if wallet_dir:
+            self.logger.debug("Using wallet directory: %s", wallet_dir)
+        else:
+            self.logger.debug("No wallet directory found during URL generation")
+
         if config.get("sqlalchemy_url"):
             return config["sqlalchemy_url"]
+        # Ensure the ``oracle+oracledb`` dialect is available.  Older SQLAlchemy
+        # releases (<2.0) do not include this dialect, which results in a
+        # ``NoSuchModuleError`` during engine creation.  Importing the dialect
+        # here both validates its presence and registers it with SQLAlchemy's
+        # plugin loader.
+        try:
+            importlib.import_module("sqlalchemy.dialects.oracle.oracledb")
+        except ModuleNotFoundError as exc:  # pragma: no cover - dependency issue
+            raise RuntimeError(
+                "The 'oracle+oracledb' dialect requires SQLAlchemy 2.x and the",
+                " 'oracledb' package.",
+            ) from exc
 
         connection_url = sqlalchemy.engine.url.URL.create(
             drivername="oracle+oracledb",
@@ -44,7 +92,6 @@ class OracleConnector(SQLConnector):
             database=config["database"],
         )
         return connection_url
-
 
     def prepare_column(
         self,
