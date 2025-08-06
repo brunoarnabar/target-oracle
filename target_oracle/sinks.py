@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from singer_sdk.sinks import SQLSink
+import importlib
+import re
+from typing import Any, Dict, Iterable, List, Optional, cast
+
+import sqlalchemy
 from singer_sdk.connectors import SQLConnector
 from singer_sdk.helpers._conformers import replace_leading_digit
-import sqlalchemy
-import importlib
-from typing import Any, Dict, Iterable, List, Optional, cast
-from sqlalchemy.dialects import oracle
 from singer_sdk.helpers._typing import get_datelike_property_type
-from sqlalchemy.schema import PrimaryKeyConstraint
+from singer_sdk.sinks import SQLSink
 from sqlalchemy import Column
-import re
+from sqlalchemy.dialects import oracle
+from sqlalchemy.schema import PrimaryKeyConstraint
+
 
 class OracleConnector(SQLConnector):
     """The connector for Oracle.
@@ -48,16 +50,27 @@ class OracleConnector(SQLConnector):
                 " 'oracledb' package."
             ) from exc
 
+        username = config.get("user") or config.get("username")
+        password = config.get("password")
+        host = config.get("host")
+        port = config.get("port")
+        database = config.get("database")
+
+        query: Dict[str, Any] = {}
+        for key in ("config_dir", "wallet_location", "wallet_password"):
+            if config.get(key):
+                query[key] = config[key]
+
         connection_url = sqlalchemy.engine.url.URL.create(
             drivername="oracle+oracledb",
-            username=config["user"],
-            password=config["password"],
-            host=config["host"],
-            port=config["port"],
-            database=config["database"],
+            username=username,
+            password=password,
+            host=host,
+            port=port,
+            database=database,
+            query=query or None,
         )
-        return connection_url
-
+        return str(connection_url)
 
     def prepare_column(
         self,
@@ -80,13 +93,12 @@ class OracleConnector(SQLConnector):
             )
             return
 
-        if not self.config.get('freeze_schema'):
+        if not self.config.get("freeze_schema"):
             self._adapt_column_type(
                 full_table_name,
                 column_name=column_name,
                 sql_type=sql_type,
             )
-
 
     def to_sql_type(self, jsonschema_type: dict) -> sqlalchemy.types.TypeEngine:  # noqa
         """Convert JSON Schema type to a SQL type.
@@ -114,12 +126,12 @@ class OracleConnector(SQLConnector):
 
         if self._jsonschema_type_check(jsonschema_type, ("integer",)):
             return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.INTEGER())
-        
+
         if self._jsonschema_type_check(jsonschema_type, ("number",)):
             if self.config.get("prefer_float_over_numeric", False):
                 return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.FLOAT())
             return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.NUMERIC(38, 10))
-        
+
         if self._jsonschema_type_check(jsonschema_type, ("boolean",)):
             return cast(sqlalchemy.types.TypeEngine, oracle.VARCHAR(1))
 
@@ -130,7 +142,6 @@ class OracleConnector(SQLConnector):
             return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.VARCHAR(2000))
 
         return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.VARCHAR(2000))
-
 
     def _jsonschema_type_check(
         self, jsonschema_type: dict, type_check: tuple[str]
@@ -155,7 +166,6 @@ class OracleConnector(SQLConnector):
             return True
 
         return False
-
 
     def _create_empty_column(
         self,
@@ -199,12 +209,10 @@ class OracleConnector(SQLConnector):
         """Temp table from another table."""
 
         try:
-            self.connection.execute(
-                f"""DROP TABLE {temp_table_name}"""
-            )
+            self.connection.execute(f"""DROP TABLE {temp_table_name}""")
         except Exception as e:
             pass
-        
+
         ddl = f"""
             CREATE TABLE {temp_table_name} AS (
                 SELECT * FROM {from_table_name}
@@ -252,12 +260,9 @@ class OracleConnector(SQLConnector):
         for property_name, property_jsonschema in properties.items():
             is_primary_key = property_name in primary_keys
             columns.append(
-                sqlalchemy.Column(
-                    property_name,
-                    self.to_sql_type(property_jsonschema)
-                )
+                sqlalchemy.Column(property_name, self.to_sql_type(property_jsonschema))
             )
-        
+
         if primary_keys:
             pk_constraint = PrimaryKeyConstraint(*primary_keys, name=f"{table_name}_PK")
             _ = sqlalchemy.Table(table_name, meta, *columns, pk_constraint)
@@ -265,7 +270,6 @@ class OracleConnector(SQLConnector):
             _ = sqlalchemy.Table(table_name, meta, *columns)
 
         meta.create_all(self._engine)
-
 
     def merge_sql_types(  # noqa
         self, sql_types: list[sqlalchemy.types.TypeEngine]
@@ -343,7 +347,6 @@ class OracleConnector(SQLConnector):
         raise ValueError(
             f"Unable to merge sql types: {', '.join([str(t) for t in sql_types])}"
         )
-
 
     def _adapt_column_type(
         self,
@@ -440,7 +443,6 @@ class OracleSink(SQLSink):
         join_keys = [self.conform_name(key, "column") for key in self.key_properties]
         schema = self.conform_schema(self.schema)
 
-
         if self.key_properties:
             self.logger.info(f"Preparing table {self.full_table_name}")
             self.connector.prepare_table(
@@ -455,10 +457,8 @@ class OracleSink(SQLSink):
             # Create a temp table (Creates from the table above)
             self.logger.info(f"Creating temp table {self.full_table_name}")
             self.connector.create_temp_table_from_table(
-                from_table_name=self.full_table_name,
-                temp_table_name=tmp_table_name
+                from_table_name=self.full_table_name, temp_table_name=tmp_table_name
             )
-
 
             # Insert into temp table
             self.bulk_insert_records(
@@ -582,7 +582,6 @@ class OracleSink(SQLSink):
 
         return None  # Unknown record count.
 
-
     def column_representation(
         self,
         schema: dict,
@@ -599,14 +598,13 @@ class OracleSink(SQLSink):
             )
         return columns
 
-
     def snakecase(self, name):
         name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
         name = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
         return name.lower()
 
     def move_leading_underscores(self, text):
-        match = re.match(r'^(_*)(.*)', text)
+        match = re.match(r"^(_*)(.*)", text)
         if match:
             result = match.group(2) + match.group(1)
             return result
@@ -633,5 +631,3 @@ class OracleSink(SQLSink):
         name = self.snakecase(name)
         # replace leading digit
         return replace_leading_digit(name)
-
-
