@@ -65,7 +65,14 @@ class TargetOracle(SQLTarget):
             th.BooleanType,
             description="Do not alter types of existing columns",
             default=False
+        ),
+        th.Property(
+            "externalauth",
+            th.BooleanType,
+            description="Use wallet/external auth (no username/password)",
+            default=False,
         )
+
     ).to_dict()
 
     default_sink_class = OracleSink

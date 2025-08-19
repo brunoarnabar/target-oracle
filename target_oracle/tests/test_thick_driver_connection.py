@@ -59,3 +59,35 @@ def test_thick_driver_connection():
         result = conn.execute(text("SELECT 1 FROM dual")).scalar()
 
     assert result == 1
+
+
+@pytest.mark.skipif(not WALLET_CREDS, reason="Oracle wallet settings not provided")
+def test_wallet_connection():
+    """Establish a thick-driver connection using an Oracle wallet."""
+    oracledb = pytest.importorskip(
+        "oracledb", reason="oracledb package not installed"
+    )
+    pytest.importorskip("sqlalchemy", reason="sqlalchemy package not installed")
+    pytest.importorskip("singer_sdk", reason="singer_sdk package not installed")
+    from sqlalchemy import create_engine, text
+    from target_oracle.sinks import OracleConnector
+
+    client_kwargs = {}
+    if ORACLE_LIB_DIR:
+        client_kwargs["lib_dir"] = ORACLE_LIB_DIR
+    if TNS_ADMIN:
+        client_kwargs["config_dir"] = TNS_ADMIN
+    try:
+        oracledb.init_oracle_client(**client_kwargs)
+    except Exception:
+        pytest.skip("Oracle client libraries not available")
+
+    connector = OracleConnector({})
+    wallet_path = connector._resolve_wallet_dir({"sqlalchemy_url": ORACLE_SQLALCHEMY_URL})
+    assert wallet_path
+
+    engine = create_engine(ORACLE_SQLALCHEMY_URL)
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT 1 FROM dual")).scalar()
+
+    assert result == 1
