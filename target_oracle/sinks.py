@@ -178,16 +178,16 @@ class OracleConnector(SQLConnector):
 
         return False
     
-    # def prepare_schema(self, schema_name: str) -> None:
-    #     """Ensure session uses the desired schema."""
-    #     if not schema_name:
-    #         return
-    #     # No need to run ALTER SESSION if proxy authentication already handles the schema
-    #     if not (self.config.get("proxy_user") and self.config.get("target_schema")):
-    #         with self.engine.connect() as connection:
-    #             connection.execute(
-    #                 text(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
-    #             )
+    def prepare_schema(self, schema_name: str) -> None:
+        """Ensure session uses the desired schema."""
+        if not schema_name:
+            return
+        # No need to run ALTER SESSION if proxy authentication already handles the schema
+        if not (self.config.get("proxy_user") and self.config.get("target_schema")):
+            with self.engine.connect() as connection:
+                connection.execute(
+                    text(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
+                )
 
     def prepare_column(self, full_table_name: str, column_name: str, sql_type: sqlalchemy.types.TypeEngine) -> None:
         """Adapt target table to provided schema if possible."""
