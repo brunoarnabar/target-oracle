@@ -442,12 +442,18 @@ class OracleSink(SQLSink):
         join_keys = [self.conform_name(key, "column") for key in join_keys]
         schema = self.conform_schema(schema)
 
-        join_condition = " and ".join([f"temp.{key} = target.{key}" for key in join_keys])
-        update_stmt = ", ".join([
-            f"target.{key} = temp.{key}"
-            for key in schema["properties"].keys()
-            if key not in join_keys
-        ])
+        join_condition = " AND ".join(
+            [f"temp.{key} = target.{key}" for key in join_keys]
+        )
+        update_stmt = ", ".join(
+            [
+                f"target.{key} = temp.{key}"
+                for key in schema["properties"]
+                if key not in join_keys
+            ]
+        )
+        insert_cols = ", ".join(schema["properties"])
+        insert_vals = ", ".join([f"temp.{key}" for key in schema["properties"]])
 
         merge_sql = f"""
             MERGE INTO {to_table_name} target
@@ -456,13 +462,13 @@ class OracleSink(SQLSink):
             WHEN MATCHED THEN
                 UPDATE SET {update_stmt}
             WHEN NOT MATCHED THEN
-                INSERT ({", ".join(schema["properties"].keys())})
-                VALUES ({", ".join([f"temp.{key}" for key in schema["properties"].keys()])})
+                INSERT ({insert_cols})
+                VALUES ({insert_vals})
         """
-
-        with self.connection.begin() as transaction:
+        with self.connection.begin():
             self.connection.execute(sqlalchemy.text(merge_sql))
-            transaction.commit()
+
+        with self.connection.begin():
             self.connection.execute(sqlalchemy.text(f"DROP TABLE {from_table_name}"))
 
     def bulk_insert_records(self, full_table_name: str, schema: dict, records: Iterable[Dict[str, Any]]) -> Optional[int]:
