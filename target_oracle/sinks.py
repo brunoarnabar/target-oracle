@@ -46,6 +46,10 @@ class OracleConnector(SQLConnector):
 
         # 3) Proxy user (wallet)
         if cfg.get("proxy_user"):
+            # If a target_schema is provided, use it for proxy authentication.
+            if cfg.get("target_schema"):
+                return f"oracle+oracledb://[{cfg['target_schema']}]@{cfg['proxy_user']}"
+            # Otherwise, connect as the proxy user directly.
             return f"oracle+oracledb://@{cfg['proxy_user']}"
 
         # 4) DSN (wallet)
@@ -85,11 +89,18 @@ class OracleConnector(SQLConnector):
             def creator():
                 if cfg.get("tns_admin"):
                     os.environ["TNS_ADMIN"] = cfg["tns_admin"]
+                
+                # The user for connection will be the proxy user with the target schema
+                user_connect_string = ""
+                if cfg.get("proxy_user") and cfg.get("target_schema"):
+                    user_connect_string = f"[{cfg['target_schema']}]"
+
                 dsn = cfg.get("proxy_user") or cfg.get("dsn")
                 if not dsn:
                     raise ValueError("proxy_user or dsn required for wallet authentication")
                 try:
-                    return oracledb.connect(dsn=dsn)
+                    # The user parameter needs to be passed for proxy auth with a DSN
+                    return oracledb.connect(user=user_connect_string, dsn=dsn)
                 except Exception as e:
                     # Raise RuntimeError so tests catch the exact type
                     raise RuntimeError("Failed to connect to Oracle") from e
@@ -167,14 +178,16 @@ class OracleConnector(SQLConnector):
 
         return False
     
-    def prepare_schema(self, schema_name: str) -> None:
-        """Ensure session uses the desired schema."""
-        if not schema_name:
-            return
-        with self.engine.connect() as connection:
-            connection.execute(
-                text(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
-            )
+    # def prepare_schema(self, schema_name: str) -> None:
+    #     """Ensure session uses the desired schema."""
+    #     if not schema_name:
+    #         return
+    #     # No need to run ALTER SESSION if proxy authentication already handles the schema
+    #     if not (self.config.get("proxy_user") and self.config.get("target_schema")):
+    #         with self.engine.connect() as connection:
+    #             connection.execute(
+    #                 text(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
+    #             )
 
     def prepare_column(self, full_table_name: str, column_name: str, sql_type: sqlalchemy.types.TypeEngine) -> None:
         """Adapt target table to provided schema if possible."""
@@ -244,7 +257,9 @@ class OracleConnector(SQLConnector):
             raise NotImplementedError("Temporary tables are not supported.")
 
         _, schema_name, table_name = self.parse_full_table_name(full_table_name)
-        meta = sqlalchemy.MetaData(schema=schema_name)
+        # Use the target_schema from config if available
+        meta_schema = self.config.get("target_schema") or schema_name
+        meta = sqlalchemy.MetaData(schema=meta_schema)
         columns: list[sqlalchemy.Column] = []
         primary_keys = primary_keys or []
         
