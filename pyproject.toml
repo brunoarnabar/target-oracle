@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "target-oracle"
-version = "0.0.2"
+version = "0.0.3"
 description = "`target-oracle` is a Singer target for Oracle, built with the Meltano Singer SDK."
 authors = ["Henning Holgersen"]
 keywords = [
