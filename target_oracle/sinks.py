@@ -460,8 +460,9 @@ class OracleSink(SQLSink):
                 VALUES ({", ".join([f"temp.{key}" for key in schema["properties"].keys()])})
         """
 
-        with self.connection.begin():
+        with self.connection.begin() as transaction:
             self.connection.execute(sqlalchemy.text(merge_sql))
+            transaction.commit()
             self.connection.execute(sqlalchemy.text(f"DROP TABLE {from_table_name}"))
 
     def bulk_insert_records(self, full_table_name: str, schema: dict, records: Iterable[Dict[str, Any]]) -> Optional[int]:
