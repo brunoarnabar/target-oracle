@@ -25,6 +25,13 @@ class OracleConnector(SQLConnector):
     allow_merge_upsert: bool = True
     allow_temp_tables: bool = True
 
+    @property
+    def engine(self) -> sqlalchemy.Engine:
+        """Back-compat for SDKs that don't expose .engine on SQLConnector."""
+        if getattr(self, "_engine", None) is None:
+            self._engine = self.create_engine()
+        return self._engine
+
     def get_sqlalchemy_url(self) -> str:
         """Generate SQLAlchemy URL for Oracle with wallet support."""
         cfg = self.config
