@@ -164,7 +164,7 @@ class OracleConnector(SQLConnector):
         """Ensure session uses the desired schema."""
         if not schema_name:
             return
-        with self.connect() as connection:
+        with self.engine.connect() as connection:
             connection.execute(
                 text(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
             )
