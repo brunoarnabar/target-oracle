@@ -124,11 +124,11 @@ class OracleConnector(SQLConnector):
             datelike_type = get_datelike_property_type(jsonschema_type)
             if datelike_type:
                 if datelike_type == "date-time":
-                    return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.TIMESTAMP())
+                    return cast(sqlalchemy.types.TypeEngine, oracle.TIMESTAMP())
                 if datelike_type in "time":
-                    return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.TIME())
+                    return cast(sqlalchemy.types.TypeEngine, oracle.TIMESTAMP())
                 if datelike_type == "date":
-                    return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.DATE())
+                    return cast(sqlalchemy.types.TypeEngine, oracle.DATE())
 
             maxlength = jsonschema_type.get("maxLength")
             if maxlength is None or maxlength > 4000:
@@ -217,15 +217,16 @@ class OracleConnector(SQLConnector):
         create_column_clause = sqlalchemy.schema.CreateColumn(
             sqlalchemy.Column(column_name, sql_type)
         )
+        compiled = create_column_clause.compile(dialect=self._engine.dialect)
 
         try:
             with self.connection.begin():
                 self.connection.execute(
-                    sqlalchemy.text(f"ALTER TABLE {full_table_name} ADD {create_column_clause}")
+                    sqlalchemy.text(f"ALTER TABLE {full_table_name} ADD {compiled}")
                 )
         except Exception as e:
             raise RuntimeError(
-                f"Could not create column '{create_column_clause}' on table '{full_table_name}'."
+                f"Could not create column '{column_name} {compiled}' on table '{full_table_name}'."
             ) from e
 
     def create_temp_table_from_table(self, from_table_name, temp_table_name):
@@ -337,10 +338,15 @@ class OracleConnector(SQLConnector):
                 f"Could not convert column '{full_table_name}.{column_name}' "
                 f"from '{current_type}' to '{compatible_sql_type}'."
             )
+
+        compiled_type = compatible_sql_type.compile(dialect=self._engine.dialect)
+
         try:
             with self.connection.begin():
                 self.connection.execute(
-                    sqlalchemy.text(f"ALTER TABLE {full_table_name} MODIFY ({column_name} {compatible_sql_type})")
+                    sqlalchemy.text(
+                        f"ALTER TABLE {full_table_name} MODIFY ({column_name} {compiled_type})"
+                    )
                 )
         except Exception as e:
             raise RuntimeError(
