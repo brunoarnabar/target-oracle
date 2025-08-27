@@ -355,6 +355,22 @@ class OracleConnector(SQLConnector):
             ) from e
 
 
+def append_suffix_to_ident(ident: str, suffix: str) -> str:
+    """Append a suffix to a quoted or unquoted Oracle identifier."""
+    ident = ident.strip()
+    if ident.startswith('"') and ident.endswith('"'):
+        return f'"{ident[1:-1]}{suffix}"'
+    return f"{ident}{suffix}"
+
+
+def build_temp_table_name(full_table_name: str, suffix: str = "_temp") -> str:
+    """Return a valid temp table FQN by appending a suffix to the table part only."""
+    base_fqn = str(full_table_name)
+    if "." in base_fqn:
+        schema_part, table_part = base_fqn.split(".", 1)
+        return f"{schema_part}.{append_suffix_to_ident(table_part, suffix)}"
+    return append_suffix_to_ident(base_fqn, suffix)
+
 class OracleSink(SQLSink):
     """Oracle target sink class."""
 
@@ -393,7 +409,7 @@ class OracleSink(SQLSink):
                 as_temp_table=False,
             )
 
-            tmp_table_name = self.full_table_name + "_temp"
+            tmp_table_name = build_temp_table_name(self.full_table_name, "_temp")
 
             self.logger.info(f"Creating temp table {tmp_table_name}")
             self.connector.create_temp_table_from_table(
