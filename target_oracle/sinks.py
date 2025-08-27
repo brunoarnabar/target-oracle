@@ -164,10 +164,10 @@ class OracleConnector(SQLConnector):
         """Ensure session uses the desired schema."""
         if not schema_name:
             return
-        engine = self.get_engine()
-        with engine.connect() as conn:
-            # Use a bind param to avoid quoting issues
-            conn.execute(text("ALTER SESSION SET CURRENT_SCHEMA = :schema"), {"schema": schema_name})
+        with self.connect() as connection:
+            connection.execute(
+                text(f"ALTER SESSION SET CURRENT_SCHEMA = {schema_name}")
+            )
 
     def prepare_column(self, full_table_name: str, column_name: str, sql_type: sqlalchemy.types.TypeEngine) -> None:
         """Adapt target table to provided schema if possible."""
