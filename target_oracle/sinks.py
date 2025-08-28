@@ -7,6 +7,9 @@ from singer_sdk.connectors import SQLConnector
 from singer_sdk.helpers._conformers import replace_leading_digit
 import os
 import re
+import time
+import datetime
+import random
 from typing import Any, Dict, Iterable, List, Optional, cast
 
 import sqlalchemy
@@ -364,12 +367,13 @@ def append_suffix_to_ident(ident: str, suffix: str) -> str:
 
 
 def build_temp_table_name(full_table_name: str, suffix: str = "_temp") -> str:
-    """Return a valid temp table FQN by appending a suffix to the table part only."""
+    """Return a valid temp table FQN by appending a per run unique suffix."""
+    uniq = f"{suffix}_{os.getpid()}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     base_fqn = str(full_table_name)
     if "." in base_fqn:
         schema_part, table_part = base_fqn.split(".", 1)
-        return f"{schema_part}.{append_suffix_to_ident(table_part, suffix)}"
-    return append_suffix_to_ident(base_fqn, suffix)
+        return f"{schema_part}.{append_suffix_to_ident(table_part, uniq)}"
+    return append_suffix_to_ident(base_fqn, uniq)
 
 class OracleSink(SQLSink):
     """Oracle target sink class."""
@@ -386,7 +390,7 @@ class OracleSink(SQLSink):
         if target_schema:
             return target_schema
 
-        # If no target schema specified, use the default schema (don't specify one)
+        # If no target schema specified, use the default schema
         return None
 
     def process_batch(self, context: dict) -> None:
@@ -437,6 +441,32 @@ class OracleSink(SQLSink):
                 records=conformed_records,
             )
 
+    def _drop_table_with_retry(
+        self,
+        table_name: str,
+        attempts: int = 8,
+        base_wait: float = 0.5,
+        purge: bool = True,
+    ) -> None:
+        """Drop table with retries on ORA 00054 and tolerate ORA 00942."""
+        ddl = f"DROP TABLE {table_name}{' PURGE' if purge else ''}"
+        last_err = None
+        for i in range(1, attempts + 1):
+            try:
+                # DDL in Oracle auto commits no explicit transaction context
+                self.connection.execute(sqlalchemy.text(ddl))
+                return
+            except Exception as e:
+                msg = str(e)
+                if "ORA-00942" in msg:
+                    return
+                if "ORA-00054" in msg and i < attempts:
+                    sleep_for = base_wait * (1.3 ** (i - 1)) + random.uniform(0, 0.2)
+                    time.sleep(sleep_for)
+                    last_err = e
+                    continue
+                raise RuntimeError(f"Failed to drop temp table {table_name}") from e if last_err is None else last_err
+
     def merge_upsert_from_table(self, from_table_name: str, to_table_name: str, schema: dict, join_keys: List[str]) -> Optional[int]:
         """Merge upsert data from one table to another."""
         join_keys = [self.conform_name(key, "column") for key in join_keys]
@@ -468,8 +498,7 @@ class OracleSink(SQLSink):
         with self.connection.begin():
             self.connection.execute(sqlalchemy.text(merge_sql))
 
-        with self.connection.begin():
-            self.connection.execute(sqlalchemy.text(f"DROP TABLE {from_table_name}"))
+        self._drop_table_with_retry(from_table_name, attempts=8, base_wait=0.5, purge=True)
 
     def bulk_insert_records(self, full_table_name: str, schema: dict, records: Iterable[Dict[str, Any]]) -> Optional[int]:
         """Bulk insert records to an existing destination table."""
