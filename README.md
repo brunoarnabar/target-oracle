@@ -116,3 +116,7 @@ meltano elt tap-carbon-intensity target-oracle
 
 See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more instructions on how to use the Meltano Singer SDK to
 develop your own Singer taps and targets.
+
+---
+ Remove-Item -Recurse -Force dist; poetry version patch; poetry build; poetry run twine upload dist/*; poetry install; pip install -e .
+---
