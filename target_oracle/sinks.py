@@ -391,6 +391,11 @@ class OracleSink(SQLSink):
 
     def process_batch(self, context: dict) -> None:
         """Process a batch with the given batch context."""
+        if isinstance(context["records"], list):
+            self.logger.info(f"Processing batch with {len(context['records'])} records")
+            if context["records"]:
+                self.logger.info(f"First record sample: {context['records'][0]}")
+        
         conformed_records = (
             [self.conform_record(record) for record in context["records"]]
             if isinstance(context["records"], list)
@@ -507,18 +512,35 @@ class OracleSink(SQLSink):
 
         self.logger.info("Inserting with SQL: %s", insert_sql)
         columns = self.column_representation(schema)
+        
+        self.logger.info(f"Expected columns: {[col.name for col in columns]}")
 
         insert_records = []
         for record in records:
             insert_record = {}
-            conformed_record = self.conform_record(record)
+            
+            if len(insert_records) == 0:
+                self.logger.info(f"First record keys: {list(record.keys())}")
+                self.logger.info(f"First record sample: {record}")
+            
             for column in columns:
-                insert_record[column.name] = conformed_record.get(column.name)
+                insert_record[column.name] = record.get(column.name)
             insert_records.append(insert_record)
 
+        self.logger.info(f"Prepared {len(insert_records)} records for insertion")
+        
         if insert_records:
-            with self.connection.begin():
-                self.connection.execute(insert_sql, insert_records)
+            try:
+                with self.connection.begin():
+                    self.connection.execute(insert_sql, insert_records)
+                    self.logger.info(f"Successfully inserted {len(insert_records)} records")
+                    return len(insert_records)
+            except Exception as e:
+                self.logger.error(f"Failed to insert records: {e}")
+                raise
+        else:
+            self.logger.warning("No records to insert!")
+            return 0
 
         if isinstance(records, list):
             return len(records)
