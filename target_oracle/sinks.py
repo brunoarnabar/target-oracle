@@ -443,27 +443,25 @@ class OracleSink(SQLSink):
             )
 
     def merge_upsert_from_table(
-        self,
-        from_table_name: str,
-        to_table_name: str,
-        schema: dict,
-        join_keys: List[str]
-    ) -> Optional[int]:
-        """Merge upsert data from one table to another."""
+    self,
+    from_table_name: str,
+    to_table_name: str,
+    schema: dict,
+    join_keys: List[str]
+) -> Optional[int]:
+        """Merge upsert data from one table to another, ensuring commit visibility and safe cleanup."""
         join_keys = [self.conform_name(key, "column") for key in join_keys]
         schema = self.conform_schema(schema)
 
-        join_condition = " AND ".join(
-            [f"temp.{key} = target.{key}" for key in join_keys]
-        )
-        
+        join_condition = " AND ".join([f"temp.{key} = target.{key}" for key in join_keys])
         non_key_columns = [key for key in schema["properties"] if key not in join_keys]
+
         if non_key_columns:
             update_stmt = ", ".join([f"target.{key} = temp.{key}" for key in non_key_columns])
             update_clause = f"UPDATE SET {update_stmt}"
         else:
-            update_clause = "UPDATE SET target.{} = temp.{}".format(join_keys[0], join_keys[0])
-        
+            update_clause = f"UPDATE SET target.{join_keys[0]} = temp.{join_keys[0]}"
+
         insert_cols = ", ".join(schema["properties"])
         insert_vals = ", ".join([f"temp.{key}" for key in schema["properties"]])
 
@@ -477,7 +475,7 @@ class OracleSink(SQLSink):
                 INSERT ({insert_cols})
                 VALUES ({insert_vals})
         """
-        
+
         connection = self.connector.engine.connect()
         try:
             with connection.begin():
@@ -485,62 +483,68 @@ class OracleSink(SQLSink):
                     sqlalchemy.text("SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM DUAL")
                 ).scalar()
                 self.logger.info(f"Current schema before merge: {schema_check}")
-                
+
                 temp_count = connection.execute(
                     sqlalchemy.text(f"SELECT COUNT(*) FROM {from_table_name}")
                 ).scalar()
-                self.logger.info(f"Records in temp table: {temp_count}")
-                
+                self.logger.info(f"Records in temp table before merge: {temp_count}")
+
                 result = connection.execute(sqlalchemy.text(merge_sql))
+                connection.commit()
                 self.logger.info(f"Merge affected {result.rowcount} rows")
-                
+
             return result.rowcount
-        
+
         finally:
-            try:
-                connection.execute(sqlalchemy.text(f"DROP TABLE {from_table_name}"))
-                self.logger.info(f"Dropped temp table {from_table_name}")
-            except Exception as e:
-                self.logger.warning(f"Failed to drop temp table: {e}")
+            for attempt in range(3):
+                try:
+                    connection.execute(sqlalchemy.text(f"DROP TABLE {from_table_name} PURGE"))
+                    self.logger.info(f"Dropped temp table {from_table_name}")
+                    break
+                except Exception as e:
+                    self.logger.warning(f"Attempt {attempt + 1} failed to drop temp table: {e}")
+                    import time; time.sleep(1)
             connection.close()
 
+
     def bulk_insert_records(self, full_table_name: str, schema: dict, records: Iterable[Dict[str, Any]]) -> Optional[int]:
-        """Bulk insert records to an existing destination table."""
+        """Bulk insert records to an existing destination table with explicit commit."""
         insert_sql = self.generate_insert_statement(full_table_name, schema)
         if isinstance(insert_sql, str):
             insert_sql = sqlalchemy.text(insert_sql)
 
         self.logger.info("Inserting with SQL: %s", insert_sql)
         columns = self.column_representation(schema)
-        
         self.logger.info(f"Expected columns: {[col.name for col in columns]}")
 
         insert_records = []
         for record in records:
             insert_record = {}
-            
             if len(insert_records) == 0:
                 self.logger.info(f"First record keys: {list(record.keys())}")
                 self.logger.info(f"First record sample: {record}")
-            
             for column in columns:
                 insert_record[column.name] = record.get(column.name)
             insert_records.append(insert_record)
 
         self.logger.info(f"Prepared {len(insert_records)} records for insertion")
-        
-        if insert_records:
-            try:
-                with self.connection.begin():
-                    self.connection.execute(insert_sql, insert_records)
-                    self.logger.info(f"Successfully inserted {len(insert_records)} records")
-                    return len(insert_records)
-            except Exception as e:
-                self.logger.error(f"Failed to insert records: {e}")
-                raise
-        else:
+
+        if not insert_records:
             self.logger.warning("No records to insert!")
             return 0
+
+        connection = self.connector.engine.connect()
+        try:
+            connection.execute(insert_sql, insert_records)
+            connection.commit()
+            self.logger.info(f"Successfully inserted {len(insert_records)} records and committed.")
+            return len(insert_records)
+        except Exception as e:
+            self.logger.error(f"Failed to insert records: {e}")
+            raise
+        finally:
+            connection.close()
+
 
         if isinstance(records, list):
             return len(records)
