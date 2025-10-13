@@ -476,16 +476,29 @@ class OracleSink(SQLSink):
         connection = self.connector.engine.connect()
         try:
             with connection.begin():
+                schema_check = connection.execute(
+                    sqlalchemy.text("SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM DUAL")
+                ).scalar()
+                self.logger.info(f"Current schema before merge: {schema_check}")
+                
+                temp_count = connection.execute(
+                    sqlalchemy.text(f"SELECT COUNT(*) FROM {from_table_name}")
+                ).scalar()
+                self.logger.info(f"Records in temp table: {temp_count}")
+                
                 result = connection.execute(sqlalchemy.text(merge_sql))
+                self.logger.info(f"Merge affected {result.rowcount} rows")
+                
             return result.rowcount
         
         finally:
             try:
                 connection.execute(sqlalchemy.text(f"DROP TABLE {from_table_name}"))
-            except Exception:
-                pass
+                self.logger.info(f"Dropped temp table {from_table_name}")
+            except Exception as e:
+                self.logger.warning(f"Failed to drop temp table: {e}")
             connection.close()
-        
+
     def bulk_insert_records(self, full_table_name: str, schema: dict, records: Iterable[Dict[str, Any]]) -> Optional[int]:
         """Bulk insert records to an existing destination table."""
         insert_sql = self.generate_insert_statement(full_table_name, schema)
