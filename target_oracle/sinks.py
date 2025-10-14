@@ -36,27 +36,27 @@ class OracleConnector(SQLConnector):
         """Generate SQLAlchemy URL for Oracle with wallet support."""
         cfg = self.config
 
-        # 1) Explicit URL wins
+        
         if cfg.get("sqlalchemy_url"):
             return cfg["sqlalchemy_url"]
 
-        # 2) Wallet helpers
+        
         if cfg.get("tns_admin"):
             os.environ["TNS_ADMIN"] = cfg["tns_admin"]
 
-        # 3) Proxy user (wallet)
+        
         if cfg.get("proxy_user"):
-            # If a target_schema is provided, use it for proxy authentication.
+            
             if cfg.get("target_schema"):
                 return f"oracle+oracledb://[{cfg['target_schema']}]@{cfg['proxy_user']}"
-            # Otherwise, connect as the proxy user directly.
+            
             return f"oracle+oracledb://@{cfg['proxy_user']}"
 
-        # 4) DSN (wallet)
+        
         if cfg.get("dsn"):
             return f"oracle+oracledb:///?dsn={cfg['dsn']}"
 
-        # 5) Traditional (non-wallet) — build manually so tests see the password in the string
+        
         if cfg.get("username") and cfg.get("password") and cfg.get("host") and cfg.get("port") and cfg.get("database"):
             return (
                 f"oracle+oracledb://{cfg['username']}:{cfg['password']}"
@@ -82,7 +82,7 @@ class OracleConnector(SQLConnector):
         kwargs = self.get_engine_kwargs()
         cfg = self.config
 
-        # Decide wallet mode from config, not from parsed URL
+        
         wallet_mode = bool(cfg.get("proxy_user") or cfg.get("dsn"))
 
         if wallet_mode:
@@ -90,7 +90,7 @@ class OracleConnector(SQLConnector):
                 if cfg.get("tns_admin"):
                     os.environ["TNS_ADMIN"] = cfg["tns_admin"]
                 
-                # The user for connection will be the proxy user with the target schema
+                
                 user_connect_string = ""
                 if cfg.get("proxy_user") and cfg.get("target_schema"):
                     user_connect_string = f"[{cfg['target_schema']}]"
@@ -99,15 +99,15 @@ class OracleConnector(SQLConnector):
                 if not dsn:
                     raise ValueError("proxy_user or dsn required for wallet authentication")
                 try:
-                    # The user parameter needs to be passed for proxy auth with a DSN
+                    
                     return oracledb.connect(user=user_connect_string, dsn=dsn)
                 except Exception as e:
-                    # Raise RuntimeError so tests catch the exact type
+                    
                     raise RuntimeError("Failed to connect to Oracle") from e
 
             return sqlalchemy.create_engine("oracle+oracledb://", creator=creator, **kwargs)
 
-        # Non wallet path
+        
         return sqlalchemy.create_engine(url, **kwargs)
 
 
@@ -132,7 +132,7 @@ class OracleConnector(SQLConnector):
 
             maxlength = jsonschema_type.get("maxLength")
             if maxlength is None or maxlength > 4000:
-                # Use CLOB for very large strings or unlimited strings
+                
                 return cast(sqlalchemy.types.TypeEngine, oracle.CLOB())
             elif maxlength <= 4000:
                 return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.VARCHAR(maxlength))
@@ -156,12 +156,12 @@ class OracleConnector(SQLConnector):
         if self._jsonschema_type_check(jsonschema_type, ("array",)):
             return cast(sqlalchemy.types.TypeEngine, oracle.CLOB())
 
-        # Default fallback
+        
         return cast(sqlalchemy.types.TypeEngine, sqlalchemy.types.VARCHAR(4000))
 
     def _jsonschema_type_check(self, jsonschema_type: dict, type_check: tuple[str]) -> bool:
         """Return True if the jsonschema_type supports the provided type."""
-        # direct 'type'
+        
         if "type" in jsonschema_type:
             tval = jsonschema_type["type"]
             if isinstance(tval, (list, tuple)):
@@ -171,7 +171,7 @@ class OracleConnector(SQLConnector):
                 if tval in type_check:
                     return True
 
-        # anyOf: recurse into subschemas
+        
         for subschema in jsonschema_type.get("anyOf", []) or []:
             if self._jsonschema_type_check(subschema, type_check):
                 return True
@@ -182,7 +182,7 @@ class OracleConnector(SQLConnector):
         """Ensure session uses the desired schema."""
         if not schema_name:
             return
-        # No need to run ALTER SESSION if proxy authentication already handles the schema
+        
         if not (self.config.get("proxy_user") and self.config.get("target_schema")):
             with self.engine.connect() as connection:
                 connection.execute(
@@ -235,7 +235,7 @@ class OracleConnector(SQLConnector):
             with self.connection.begin():
                 self.connection.execute(sqlalchemy.text(f"DROP TABLE {temp_table_name}"))
         except Exception:
-            pass  # Table doesn't exist
+            pass  
         
         ddl = f"""
             CREATE TABLE {temp_table_name} AS (
@@ -258,7 +258,7 @@ class OracleConnector(SQLConnector):
             raise NotImplementedError("Temporary tables are not supported.")
 
         _, schema_name, table_name = self.parse_full_table_name(full_table_name)
-        # Use the target_schema from config if available
+        
         meta_schema = self.config.get("target_schema") or schema_name
         meta = sqlalchemy.MetaData(schema=meta_schema)
         columns: list[sqlalchemy.Column] = []
@@ -385,16 +385,12 @@ class OracleSink(SQLSink):
         
         if target_schema:
             return target_schema
-
-        # If no target schema specified, use the default schema (don't specify one)
         return None
 
     def process_batch(self, context: dict) -> None:
         """Process a batch with the given batch context."""
         if isinstance(context["records"], list):
             self.logger.info(f"Processing batch with {len(context['records'])} records")
-            if context["records"]:
-                self.logger.info(f"First record sample: {context['records'][0]}")
         
         conformed_records = (
             [self.conform_record(record) for record in context["records"]]
@@ -406,7 +402,6 @@ class OracleSink(SQLSink):
         schema = self.conform_schema(self.schema)
 
         if self.key_properties:
-            self.logger.info(f"Preparing table {self.full_table_name}")
             self.connector.prepare_table(
                 full_table_name=self.full_table_name,
                 schema=schema,
@@ -427,7 +422,7 @@ class OracleSink(SQLSink):
                 schema=schema,
                 records=conformed_records,
             )
-            
+
             self.logger.info(f"Merging data from temp table to {self.full_table_name}")
             self.merge_upsert_from_table(
                 from_table_name=tmp_table_name,
@@ -443,13 +438,13 @@ class OracleSink(SQLSink):
             )
 
     def merge_upsert_from_table(
-    self,
-    from_table_name: str,
-    to_table_name: str,
-    schema: dict,
-    join_keys: List[str]
-) -> Optional[int]:
-        """Merge upsert data from one table to another, ensuring commit visibility and safe cleanup."""
+        self,
+        from_table_name: str,
+        to_table_name: str,
+        schema: dict,
+        join_keys: List[str]
+    ) -> Optional[int]:
+        """Merge upsert data from one table to another."""
         join_keys = [self.conform_name(key, "column") for key in join_keys]
         schema = self.conform_schema(schema)
 
@@ -479,22 +474,11 @@ class OracleSink(SQLSink):
         connection = self.connector.engine.connect()
         try:
             with connection.begin():
-                schema_check = connection.execute(
-                    sqlalchemy.text("SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM DUAL")
-                ).scalar()
-                self.logger.info(f"Current schema before merge: {schema_check}")
-
-                temp_count = connection.execute(
-                    sqlalchemy.text(f"SELECT COUNT(*) FROM {from_table_name}")
-                ).scalar()
-                self.logger.info(f"Records in temp table before merge: {temp_count}")
-
                 result = connection.execute(sqlalchemy.text(merge_sql))
                 connection.commit()
                 self.logger.info(f"Merge affected {result.rowcount} rows")
 
             return result.rowcount
-
         finally:
             for attempt in range(3):
                 try:
@@ -513,18 +497,10 @@ class OracleSink(SQLSink):
         if isinstance(insert_sql, str):
             insert_sql = sqlalchemy.text(insert_sql)
 
-        self.logger.info("Inserting with SQL: %s", insert_sql)
         columns = self.column_representation(schema)
-        self.logger.info(f"Expected columns: {[col.name for col in columns]}")
-
         insert_records = []
         for record in records:
-            insert_record = {}
-            if len(insert_records) == 0:
-                self.logger.info(f"First record keys: {list(record.keys())}")
-                self.logger.info(f"First record sample: {record}")
-            for column in columns:
-                insert_record[column.name] = record.get(column.name)
+            insert_record = {column.name: record.get(column.name) for column in columns}
             insert_records.append(insert_record)
 
         self.logger.info(f"Prepared {len(insert_records)} records for insertion")
@@ -545,11 +521,7 @@ class OracleSink(SQLSink):
         finally:
             connection.close()
 
-
-        if isinstance(records, list):
-            return len(records)
-
-        return None
+            return None
 
     def column_representation(self, schema: dict) -> List[Column]:
         """Return a sql alchemy table representation for the current schema."""
